@@ -90,12 +90,10 @@ REGEX_CUENTAS = "borismarinkovic|boris_marinkovic|fundacionmecenas|fundacion_mec
 QUERIES_PRENSA = [
     '"Boris Marinkovic"',
     '"Boris Marinković"',
-    '"Fundación Mecenas"',
-    '"Boris Marinkovic" (arte OR artista OR cuir OR exposición)',
-    '"Boris Marinkovic" (médico OR cirujano OR hospital)'
+    '"Fundación Mecenas"'
 ]
 
-QUERY_REDES_SOCIALES = '"Boris Marinkovic" OR "Fundación Mecenas" OR "borismarinkovic" OR "fundacionmecenas"'
+QUERY_REDES_SOCIALES = '"Boris Marinkovic" OR "Fundación Mecenas" OR borismarinkovic OR fundacionmecenas'
 
 @st.cache_data(ttl=3600)
 def buscar_menciones(query_avanzada, filtro_red_social=None):
@@ -119,8 +117,19 @@ def buscar_menciones(query_avanzada, filtro_red_social=None):
         for noticia in sopa.find_all("item"):
             titulo = noticia.title.text if noticia.title else ""
             link   = noticia.link.text  if noticia.link  else ""
+            descripcion = noticia.description.text if noticia.description else ""
             
-            texto_completo = (titulo + " " + link).lower()
+            # Unimos todo para buscar coincidencias exactas
+            texto_completo = (titulo + " " + link + " " + descripcion).lower()
+
+            # 🛑 FILTRO DE PERTENENCIA ESTRICTA (Evita la "basura" de Google)
+            # Obligamos a que la noticia mencione explícitamente al cliente o su fundación
+            identidades = [
+                "boris marinkovic", "boris marinković", "borismarinkovic",
+                "fundación mecenas", "fundacion mecenas", "fundacionmecenas"
+            ]
+            if not any(ident in texto_completo for ident in identidades):
+                continue
 
             # 🛑 FILTRO ANTI-CLONES 2.0 (Incluye al tirador deportivo de Bolivia)
             clones = [
