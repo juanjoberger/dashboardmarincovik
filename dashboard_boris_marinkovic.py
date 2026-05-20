@@ -62,10 +62,6 @@ DICCIONARIO_SENTIMIENTO = {
 }
 
 def analizar_sentimiento_avanzado(texto):
-    """
-    Analiza el sentimiento de un texto usando el diccionario personalizado.
-    Retorna (categoría: str, puntaje_promedio: float).
-    """
     texto = texto.lower()
     puntaje_total = 0
     palabras_encontradas = 0
@@ -82,8 +78,7 @@ def analizar_sentimiento_avanzado(texto):
     else:                 return "Neutral",  promedio
 
 # ==========================================
-# HANDLES Y QUERIES MULTIPLES (ESTRATEGIA EXHAUSTIVA)
-# Para evitar que Google News ignore cadenas muy largas, dividimos las búsquedas.
+# HANDLES Y QUERIES MULTIPLES
 # ==========================================
 REGEX_CUENTAS = "borismarinkovic|boris_marinkovic|fundacionmecenas|fundacion_mecenas|mecenas"
 
@@ -97,17 +92,11 @@ QUERY_REDES_SOCIALES = '"Boris Marinkovic" OR "Fundación Mecenas" OR borismarin
 
 @st.cache_data(ttl=3600)
 def buscar_menciones(query_avanzada, filtro_red_social=None):
-    """
-    Consulta Google News RSS. Filtra falsos positivos, clasifica fuente y sentimiento.
-    """
     query = query_avanzada
     if filtro_red_social:
         query += f" site:{filtro_red_social}"
 
-    url = (
-        f"https://news.google.com/rss/search?q={urllib.parse.quote(query)}"
-        f"&hl=es-419&gl=CL&ceid=CL:es-419"
-    )
+    url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query)}&hl=es-419&gl=CL&ceid=CL:es-419"
 
     try:
         respuesta = requests.get(url, timeout=10)
@@ -117,45 +106,50 @@ def buscar_menciones(query_avanzada, filtro_red_social=None):
         for noticia in sopa.find_all("item"):
             titulo = noticia.title.text if noticia.title else ""
             link   = noticia.link.text  if noticia.link  else ""
-            descripcion = noticia.description.text if noticia.description else ""
             
-            # Unimos todo para buscar coincidencias exactas
+            # Extraemos la descripción (contexto) y limpiamos el HTML
+            descripcion_raw = noticia.description.text if noticia.description else ""
+            descripcion = BeautifulSoup(descripcion_raw, "html.parser").get_text(separator=" ").strip()
+            
             texto_completo = (titulo + " " + link + " " + descripcion).lower()
 
-            # 🛑 FILTRO DE PERTENENCIA ESTRICTA (Evita la "basura" de Google)
-            # Obligamos a que la noticia mencione explícitamente al cliente o su fundación
-            identidades = [
-                "boris marinkovic", "boris marinković", "borismarinkovic",
-                "fundación mecenas", "fundacion mecenas", "fundacionmecenas"
-            ]
+            # 🛑 1. FILTRO ANTI-PERFILES BASURA (LinkedIn Spam)
+            # Si es un perfil de LinkedIn genérico (no un post o artículo), lo saltamos
+            if "linkedin.com/in/" in link.lower() and not any(n in titulo.lower() for n in ["boris", "mecenas"]):
+                continue
+                
+            # Si es una página de empresa genérica
+            if "linkedin.com/company/" in link.lower() and not any(n in titulo.lower() for n in ["boris", "mecenas"]):
+                continue
+
+            # 🛑 2. FILTRO DE PERTENENCIA ESTRICTA EN CONTEXTO
+            identidades = ["boris marinkovic", "boris marinković", "borismarinkovic", "fundación mecenas", "fundacion mecenas", "fundacionmecenas"]
             if not any(ident in texto_completo for ident in identidades):
                 continue
 
-            # 🛑 FILTRO ANTI-CLONES 2.0 (Incluye al tirador deportivo de Bolivia)
+            # 🛑 3. FILTRO ANTI-CLONES 2.0
             clones = [
-                "gutierrez", "gutiérrez", "san bernardo", # Médico homónimo
-                "bolivia", "santa cruz", "diez.bo", "cochabamba", # Lugares de Bolivia
-                "tiro deportivo", "récord", "deportista", "campeonato" # El atleta homónimo
+                "gutierrez", "gutiérrez", "san bernardo", 
+                "bolivia", "santa cruz", "diez.bo", "cochabamba", 
+                "tiro deportivo", "récord", "deportista", "campeonato" 
             ]
             if any(omit in texto_completo for omit in clones):
                 continue
 
             try:
-                fecha_dt = datetime.strptime(
-                    noticia.pubDate.text, "%a, %d %b %Y %H:%M:%S %Z"
-                )
+                fecha_dt = datetime.strptime(noticia.pubDate.text, "%a, %d %b %Y %H:%M:%S %Z")
             except Exception:
                 continue
 
-            # 🕰️ AMPLIACIÓN HISTÓRICA: Buscamos desde 2018 para tener trayectoria completa
+            # Amplitud histórica
             if fecha_dt.year < 2018:
                 continue
 
-            categoria, puntaje = analizar_sentimiento_avanzado(titulo)
+            categoria, puntaje = analizar_sentimiento_avanzado(titulo + " " + descripcion)
             fuente = "Prensa"
             cuenta = "Medio de Prensa"
 
-            # Etiquetado de fuente por contexto del link/título
+            # Etiquetado de fuente
             if "fundacionmecenas" in texto_completo or "fundación mecenas" in titulo.lower():
                 fuente = "Fundación Mecenas"
                 cuenta = "@fundacionmecenas"
@@ -164,34 +158,20 @@ def buscar_menciones(query_avanzada, filtro_red_social=None):
                 cuenta = titulo.split(" en X:")[0].strip() if " en X:" in titulo else "Usuario X"
             elif "linkedin.com" in texto_completo or " | linkedin" in titulo.lower():
                 fuente = "LinkedIn"
-                cuenta = (
-                    titulo.split(" | LinkedIn")[0].split("-")[-1].strip()
-                    if " | LinkedIn" in titulo else "Usuario LinkedIn"
-                )
+                cuenta = titulo.split(" | LinkedIn")[0].split("-")[-1].strip() if " | LinkedIn" in titulo else "Usuario LinkedIn"
             elif "facebook.com" in texto_completo or " - facebook" in titulo.lower():
                 fuente = "Facebook"
-                cuenta = (
-                    "borismarinkovic"
-                    if any(c in texto_completo for c in REGEX_CUENTAS.split("|"))
-                    else "Usuario Facebook"
-                )
+                cuenta = "borismarinkovic" if any(c in texto_completo for c in REGEX_CUENTAS.split("|")) else "Usuario Facebook"
             elif "instagram.com" in texto_completo or " - instagram" in titulo.lower():
                 fuente = "Instagram"
-                cuenta = (
-                    "fundacionmecenas"
-                    if "fundacionmecenas" in texto_completo
-                    else (
-                        "borismarinkovic"
-                        if "borismarinkovic" in texto_completo
-                        else "Usuario Instagram"
-                    )
-                )
+                cuenta = "fundacionmecenas" if "fundacionmecenas" in texto_completo else ("borismarinkovic" if "borismarinkovic" in texto_completo else "Usuario Instagram")
 
             datos.append({
                 "Fecha":            fecha_dt.date(),
                 "Fuente":           fuente,
                 "Cuenta / Autor":   cuenta,
                 "Título / Mención": titulo,
+                "Extracto":         descripcion, # Agregamos el contexto
                 "Sentimiento":      categoria,
                 "Puntaje":          puntaje,
                 "Link":             link,
@@ -200,7 +180,6 @@ def buscar_menciones(query_avanzada, filtro_red_social=None):
         return pd.DataFrame(datos)
 
     except Exception as e:
-        # En vez de mostrar error en pantalla y asustar al cliente, devolvemos un df vacío
         return pd.DataFrame()
 
 # ==========================================
@@ -218,10 +197,8 @@ def main():
     if st.button("🔄 Actualizar Datos Ahora"):
         st.cache_data.clear()
 
-    # --- Carga de datos desde múltiples fuentes (Estrategia Exhaustiva) ---
     with st.spinner("Rastreando huella digital y ejecutando búsqueda histórica exhaustiva..."):
         
-        # 1. Ejecutar múltiples búsquedas de prensa para sortear límites de Google
         dfs_prensa = []
         for query in QUERIES_PRENSA:
             df_temp = buscar_menciones(query)
@@ -230,13 +207,11 @@ def main():
                 
         df_prensa = pd.concat(dfs_prensa).drop_duplicates(subset=["Link"]) if dfs_prensa else pd.DataFrame()
 
-        # 2. Búsquedas específicas en Redes Sociales
         df_x        = buscar_menciones(QUERY_REDES_SOCIALES, "twitter.com")
         df_linkedin = buscar_menciones(QUERY_REDES_SOCIALES, "linkedin.com")
         df_ig       = buscar_menciones(QUERY_REDES_SOCIALES, "instagram.com")
-        df_fb       = buscar_menciones(QUERY_REDES_SOCIALES, "facebook.com") # Añadido Facebook
+        df_fb       = buscar_menciones(QUERY_REDES_SOCIALES, "facebook.com")
 
-        # 3. Unificar todo
         tablas_a_unir = [df_prensa, df_x, df_linkedin, df_ig, df_fb]
         tablas_a_unir = [df for df in tablas_a_unir if not df.empty]
         
@@ -256,12 +231,10 @@ def main():
         return
 
     # ==========================================
-    # KPIs Y VELOCÍMETRO DE REPUTACIÓN
+    # KPIs Y VELOCÍMETRO
     # ==========================================
     st.subheader("📊 Salud de Marca Digital")
-    puntaje_general = df_total["Puntaje"].mean() * 20  # Escala -100 / +100
-    
-    # Manejo seguro de NaN si todas las noticias son Neutrales (Puntaje 0)
+    puntaje_general = df_total["Puntaje"].mean() * 20 
     if pd.isna(puntaje_general): puntaje_general = 0 
 
     col_gauge, col_kpis = st.columns([1, 2])
@@ -296,6 +269,7 @@ def main():
         negativos = len(df_total[df_total["Sentimiento"] == "Negativo"])
         menciones_mecenas = len(df_total[
             df_total["Título / Mención"].str.contains("mecenas", case=False, na=False) |
+            df_total["Extracto"].str.contains("mecenas", case=False, na=False) |
             df_total["Fuente"].str.contains("Mecenas", na=False)
         ])
 
@@ -313,6 +287,7 @@ def main():
     df_medios  = df_total[df_total["Fuente"] == "Prensa"]
     df_mecenas = df_total[
         df_total["Título / Mención"].str.contains("mecenas|Mecenas", na=False) |
+        df_total["Extracto"].str.contains("mecenas|Mecenas", na=False) |
         df_total["Fuente"].str.contains("Mecenas", na=False)
     ]
 
@@ -343,10 +318,7 @@ def main():
                 )
                 st.plotly_chart(fig_social, use_container_width=True)
             with col2:
-                # Filtro Anti-Ego: excluir cuentas propias del cliente
-                df_otros = df_social[
-                    ~df_social["Cuenta / Autor"].str.contains(REGEX_CUENTAS, case=False, na=False)
-                ]
+                df_otros = df_social[~df_social["Cuenta / Autor"].str.contains(REGEX_CUENTAS, case=False, na=False)]
                 top = df_otros["Cuenta / Autor"].value_counts().reset_index().head(5)
                 top.columns = ["Cuenta", "Menciones"]
                 fig_top = px.bar(
@@ -357,10 +329,13 @@ def main():
                 fig_top.update_layout(yaxis={"categoryorder": "total ascending"})
                 st.plotly_chart(fig_top, use_container_width=True)
 
-            st.markdown("#### Últimas menciones en redes")
-            for _, row in df_social.head(5).iterrows():
+            st.markdown("#### Últimas menciones en redes (Con contexto)")
+            for _, row in df_social.head(8).iterrows():
                 icono = "🟢" if row["Sentimiento"]=="Positivo" else ("🔴" if row["Sentimiento"]=="Negativo" else "⚪")
-                st.info(f"{icono} **{row['Cuenta / Autor']}** en {row['Fuente']}: [{row['Título / Mención']}]({row['Link']})")
+                with st.expander(f"{icono} {row['Cuenta / Autor']} en {row['Fuente']} - {row['Fecha']}"):
+                    st.markdown(f"**Título:** [{row['Título / Mención']}]({row['Link']})")
+                    # Mostramos el contexto exacto de por qué Google trajo esto
+                    st.caption(f"**Por qué apareció en el radar (Contexto extraído):** {row['Extracto']}")
         indice += 1
 
     # ------------------------------------------
@@ -369,23 +344,22 @@ def main():
     if not df_mecenas.empty:
         with pestanas[indice]:
             st.markdown(
-                "#### Cobertura de Boris Marinkovic en su rol de Presidente de Fundación Mecenas\n"
-                "> Fundación sin fines de lucro fundada en agosto de 2024 · Arte cuir · LGBTIQANB+ · Chile"
+                "#### Cobertura vinculada a Fundación Mecenas\n"
+                "> Fundación sin fines de lucro · Arte cuir · LGBTIQANB+ · Chile"
             )
             col_m1, col_m2 = st.columns(2)
             with col_m1:
                 fig_m_sent = px.pie(
                     df_mecenas, names="Sentimiento", color="Sentimiento",
                     color_discrete_map={"Positivo":"#00cc96","Neutral":"#7f7f7f","Negativo":"#ff4b4b"},
-                    title="Tono de las menciones de Fundación Mecenas",
-                    hole=0.4,
+                    title="Tono de las menciones", hole=0.4,
                 )
                 st.plotly_chart(fig_m_sent, use_container_width=True)
             with col_m2:
                 fig_m_fuente = px.histogram(
                     df_mecenas, x="Fuente", color="Sentimiento",
                     color_discrete_map={"Positivo":"#00cc96","Neutral":"#7f7f7f","Negativo":"#ff4b4b"},
-                    title="Fuente de las menciones de Fundación Mecenas",
+                    title="Fuente de las menciones",
                 )
                 st.plotly_chart(fig_m_fuente, use_container_width=True)
 
@@ -393,11 +367,10 @@ def main():
             for _, row in df_mecenas.head(10).iterrows():
                 color = "#00cc96" if row["Sentimiento"]=="Positivo" else ("#ff4b4b" if row["Sentimiento"]=="Negativo" else "#7f7f7f")
                 st.markdown(
-                    f"<div style='padding:14px;border-left:6px solid {color};"
-                    f"background:#f8f9fa;margin-bottom:12px;border-radius:0 6px 6px 0;'>"
-                    f"<strong>{row['Fuente']}</strong> · "
-                    f"<span style='color:{color};font-weight:bold'>{row['Sentimiento']}</span><br>"
+                    f"<div style='padding:14px;border-left:6px solid {color}; background:#f8f9fa;margin-bottom:12px;border-radius:0 6px 6px 0;'>"
+                    f"<strong>{row['Fuente']}</strong> · <span style='color:{color};font-weight:bold'>{row['Sentimiento']}</span><br>"
                     f"<i>{row['Título / Mención']}</i><br>"
+                    f"<small style='color:gray'>Contexto: {row['Extracto'][:150]}...</small><br>"
                     f"<small>📅 {row['Fecha']} · <a href='{row['Link']}' target='_blank'>🔗 Ver publicación</a></small>"
                     f"</div>",
                     unsafe_allow_html=True,
@@ -413,24 +386,18 @@ def main():
             fig_tl = px.scatter(
                 df_medios, x="Fecha", y="Puntaje", color="Sentimiento",
                 color_discrete_map={"Positivo":"#00cc96","Neutral":"#7f7f7f","Negativo":"#ff4b4b"},
-                hover_data=["Título / Mención","Cuenta / Autor"],
-                title="Evolución del tono mediático",
+                hover_data=["Título / Mención"], title="Evolución del tono mediático",
             )
             fig_tl.update_traces(marker=dict(size=10, opacity=0.8))
             fig_tl.add_hline(y=0, line_dash="dot", line_color="gray", annotation_text="Zona Neutral")
             st.plotly_chart(fig_tl, use_container_width=True)
 
-            fig_pie = px.pie(
-                df_medios, names="Sentimiento", color="Sentimiento",
-                color_discrete_map={"Positivo":"#00cc96","Neutral":"#7f7f7f","Negativo":"#ff4b4b"},
-                hole=0.4, title="Distribución de sentimiento en prensa",
-            )
-            st.plotly_chart(fig_pie, use_container_width=True)
-
-            st.markdown("#### Noticias recientes")
-            for _, row in df_medios.head(8).iterrows():
+            st.markdown("#### Noticias recientes (Con contexto)")
+            for _, row in df_medios.head(10).iterrows():
                 icono = "🟢" if row["Sentimiento"]=="Positivo" else ("🔴" if row["Sentimiento"]=="Negativo" else "⚪")
-                st.markdown(f"{icono} [{row['Título / Mención']}]({row['Link']}) — *{row['Fecha']}*")
+                with st.expander(f"{icono} {row['Fecha']} — {row['Título / Mención']}"):
+                    st.write(f"**Extracto de la noticia:** {row['Extracto']}")
+                    st.markdown(f"[🔗 Leer nota completa en {row['Fuente']}]({row['Link']})")
         else:
             st.info("No se encontraron menciones en prensa para el período analizado.")
     indice += 1
@@ -447,18 +414,19 @@ def main():
         with col_f2:
             filtro_sent = st.selectbox("Filtrar por Sentimiento", ["Todos","Positivo","Neutral","Negativo"])
         with col_f3:
-            busq_texto = st.text_input("Buscar en títulos", "")
+            busq_texto = st.text_input("Buscar en títulos o extractos", "")
 
         df_f = df_total.copy()
         if filtro_fuente != "Todas":  df_f = df_f[df_f["Fuente"] == filtro_fuente]
         if filtro_sent  != "Todos":   df_f = df_f[df_f["Sentimiento"] == filtro_sent]
-        if busq_texto:                df_f = df_f[df_f["Título / Mención"].str.contains(busq_texto, case=False, na=False)]
+        if busq_texto:                
+            df_f = df_f[df_f["Título / Mención"].str.contains(busq_texto, case=False, na=False) | 
+                        df_f["Extracto"].str.contains(busq_texto, case=False, na=False)]
 
         st.caption(f"Mostrando {len(df_f)} de {len(df_total)} registros")
 
-        # Compatible con Pandas 2.x: df.style.map (NO applymap)
         st.dataframe(
-            df_f.style.map(
+            df_f[["Fecha", "Fuente", "Cuenta / Autor", "Título / Mención", "Sentimiento", "Puntaje"]].style.map(
                 lambda x: (
                     "background-color: #ffcccc" if x == "Negativo"
                     else ("background-color: #ccffcc" if x == "Positivo" else "")
@@ -470,56 +438,15 @@ def main():
         )
 
         csv = df_f.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            "⬇️ Descargar CSV filtrado", csv,
-            "menciones_boris_marinkovic.csv", "text/csv",
-        )
+        st.download_button("⬇️ Descargar CSV filtrado", csv, "menciones_boris.csv", "text/csv")
     indice += 1
 
     # ------------------------------------------
     # PESTAÑA: RASTRO CUENTAS OFICIALES (Anti-Ego)
-    # Monitora: @borismarinkovic + @fundacionmecenas
     # ------------------------------------------
     with pestanas[indice]:
         st.markdown("#### Interacciones de terceros hacia las cuentas oficiales")
-        st.caption(
-            "Filtro Anti-Ego activo · Cuentas monitoreadas: "
-            "@borismarinkovic (Instagram personal) · @fundacionmecenas (Instagram fundación)"
-        )
+        st.caption("Filtro Anti-Ego activo · Cuentas monitoreadas: @borismarinkovic · @fundacionmecenas")
 
         filtro_cuentas = (
-            df_total["Título / Mención"].str.contains(REGEX_CUENTAS, case=False, na=False) |
-            df_total["Link"].str.contains(REGEX_CUENTAS, case=False, na=False)
-        )
-        # Anti-Ego: excluir publicaciones donde el autor ES el propio cliente
-        filtro_no_cliente = ~df_total["Cuenta / Autor"].str.contains(REGEX_CUENTAS, case=False, na=False)
-        df_oficial = df_total[filtro_cuentas & filtro_no_cliente]
-
-        if not df_oficial.empty:
-            st.metric("Interacciones de terceros detectadas", len(df_oficial))
-            for _, row in df_oficial.head(10).iterrows():
-                color = "#00cc96" if row["Sentimiento"]=="Positivo" else ("#ff4b4b" if row["Sentimiento"]=="Negativo" else "#7f7f7f")
-                st.markdown(
-                    f"<div style='padding:15px;border-left:6px solid {color};"
-                    f"background:#f8f9fa;margin-bottom:15px;border-radius:0 6px 6px 0;'>"
-                    f"<strong>{row['Fuente']}</strong> · "
-                    f"<span style='color:{color};font-weight:bold'>{row['Sentimiento']}</span><br>"
-                    f"<i>{row['Título / Mención']}</i><br>"
-                    f"<small>📅 {row['Fecha']} · <a href='{row['Link']}' target='_blank'>🔗 Ver publicación</a></small>"
-                    f"</div>",
-                    unsafe_allow_html=True,
-                )
-        else:
-            st.info("No se detectaron interacciones recientes de terceros hacia las cuentas oficiales.")
-
-    # Pie de página
-    st.divider()
-    st.caption(
-        f"🕐 Última actualización: {datetime.now().strftime('%d/%m/%Y %H:%M')} · "
-        "Fuente: Google News RSS · "
-        "Cuentas monitoreadas: @borismarinkovic · @fundacionmecenas · "
-        "Variantes y contexto: Boris Marinkovic (Desde 2018) / Arte Cuir / Fundación Mecenas / U. de Chile"
-    )
-
-if __name__ == "__main__":
-    main()
+            df
