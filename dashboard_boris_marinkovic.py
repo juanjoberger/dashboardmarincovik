@@ -73,9 +73,12 @@ def analizar_sentimiento_avanzado(texto):
 
     promedio = puntaje_total / palabras_encontradas if palabras_encontradas > 0 else 0
 
-    if promedio > 0.5:   return "Positivo", promedio
-    elif promedio < -0.5: return "Negativo", promedio
-    else:                 return "Neutral",  promedio
+    if promedio > 0.5:   
+        return "Positivo", promedio
+    elif promedio < -0.5: 
+        return "Negativo", promedio
+    else:                 
+        return "Neutral", promedio
 
 # ==========================================
 # HANDLES Y QUERIES MULTIPLES
@@ -171,7 +174,7 @@ def buscar_menciones(query_avanzada, filtro_red_social=None):
                 "Fuente":           fuente,
                 "Cuenta / Autor":   cuenta,
                 "Título / Mención": titulo,
-                "Extracto":         descripcion, # Agregamos el contexto
+                "Extracto":         descripcion, 
                 "Sentimiento":      categoria,
                 "Puntaje":          puntaje,
                 "Link":             link,
@@ -235,7 +238,8 @@ def main():
     # ==========================================
     st.subheader("📊 Salud de Marca Digital")
     puntaje_general = df_total["Puntaje"].mean() * 20 
-    if pd.isna(puntaje_general): puntaje_general = 0 
+    if pd.isna(puntaje_general): 
+        puntaje_general = 0 
 
     col_gauge, col_kpis = st.columns([1, 2])
 
@@ -274,8 +278,8 @@ def main():
         ])
 
         k1.metric("Total Menciones",          len(df_total))
-        k2.metric("Menciones en Redes",        len(df_total[df_total["Fuente"] != "Prensa"]))
-        k3.metric("Positivas / Negativas",     f"{positivos} / {negativos}")
+        k2.metric("Menciones en Redes",       len(df_total[df_total["Fuente"] != "Prensa"]))
+        k3.metric("Positivas / Negativas",    f"{positivos} / {negativos}")
         k4.metric("Menciones Fdción. Mecenas", menciones_mecenas)
 
     st.divider()
@@ -292,8 +296,11 @@ def main():
     ]
 
     nombres_pestanas = []
-    if not df_social.empty:   nombres_pestanas.append("📱 Ecosistema Redes")
-    if not df_mecenas.empty:  nombres_pestanas.append("🏛️ Fundación Mecenas")
+    if not df_social.empty:   
+        nombres_pestanas.append("📱 Ecosistema Redes")
+    if not df_mecenas.empty:  
+        nombres_pestanas.append("🏛️ Fundación Mecenas")
+        
     nombres_pestanas.extend([
         "📰 Medios y Prensa",
         "🗄️ Base de Datos Completa",
@@ -334,7 +341,6 @@ def main():
                 icono = "🟢" if row["Sentimiento"]=="Positivo" else ("🔴" if row["Sentimiento"]=="Negativo" else "⚪")
                 with st.expander(f"{icono} {row['Cuenta / Autor']} en {row['Fuente']} - {row['Fecha']}"):
                     st.markdown(f"**Título:** [{row['Título / Mención']}]({row['Link']})")
-                    # Mostramos el contexto exacto de por qué Google trajo esto
                     st.caption(f"**Por qué apareció en el radar (Contexto extraído):** {row['Extracto']}")
         indice += 1
 
@@ -417,8 +423,10 @@ def main():
             busq_texto = st.text_input("Buscar en títulos o extractos", "")
 
         df_f = df_total.copy()
-        if filtro_fuente != "Todas":  df_f = df_f[df_f["Fuente"] == filtro_fuente]
-        if filtro_sent  != "Todos":   df_f = df_f[df_f["Sentimiento"] == filtro_sent]
+        if filtro_fuente != "Todas":  
+            df_f = df_f[df_f["Fuente"] == filtro_fuente]
+        if filtro_sent  != "Todos":   
+            df_f = df_f[df_f["Sentimiento"] == filtro_sent]
         if busq_texto:                
             df_f = df_f[df_f["Título / Mención"].str.contains(busq_texto, case=False, na=False) | 
                         df_f["Extracto"].str.contains(busq_texto, case=False, na=False)]
@@ -448,5 +456,38 @@ def main():
         st.markdown("#### Interacciones de terceros hacia las cuentas oficiales")
         st.caption("Filtro Anti-Ego activo · Cuentas monitoreadas: @borismarinkovic · @fundacionmecenas")
 
+        # Aseguramos que los parentesis cierren correctamente en esta variable
         filtro_cuentas = (
-            df
+            df_total["Título / Mención"].str.contains(REGEX_CUENTAS, case=False, na=False) |
+            df_total["Extracto"].str.contains(REGEX_CUENTAS, case=False, na=False) |
+            df_total["Link"].str.contains(REGEX_CUENTAS, case=False, na=False)
+        )
+        
+        filtro_no_cliente = ~df_total["Cuenta / Autor"].str.contains(REGEX_CUENTAS, case=False, na=False)
+        df_oficial = df_total[filtro_cuentas & filtro_no_cliente]
+
+        if not df_oficial.empty:
+            st.metric("Interacciones de terceros detectadas", len(df_oficial))
+            for _, row in df_oficial.head(10).iterrows():
+                color = "#00cc96" if row["Sentimiento"]=="Positivo" else ("#ff4b4b" if row["Sentimiento"]=="Negativo" else "#7f7f7f")
+                st.markdown(
+                    f"<div style='padding:15px;border-left:6px solid {color}; background:#f8f9fa;margin-bottom:15px;border-radius:0 6px 6px 0;'>"
+                    f"<strong>{row['Fuente']}</strong> · <span style='color:{color};font-weight:bold'>{row['Sentimiento']}</span><br>"
+                    f"<i>{row['Título / Mención']}</i><br>"
+                    f"<small style='color:gray'>Contexto: {row['Extracto'][:150]}...</small><br>"
+                    f"<small>📅 {row['Fecha']} · <a href='{row['Link']}' target='_blank'>🔗 Ver publicación</a></small>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.info("No se detectaron interacciones recientes de terceros hacia las cuentas oficiales.")
+
+    st.divider()
+    st.caption(
+        f"🕐 Última actualización: {datetime.now().strftime('%d/%m/%Y %H:%M')} · "
+        "Fuente: Google News RSS · "
+        "Variantes y contexto: Boris Marinkovic (Desde 2018) / Arte Cuir / Fundación Mecenas / U. de Chile"
+    )
+
+if __name__ == "__main__":
+    main()
