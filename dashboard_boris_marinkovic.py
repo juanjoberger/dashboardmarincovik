@@ -6,7 +6,6 @@ from datetime import datetime
 import plotly.express as px
 import plotly.graph_objects as go
 import urllib.parse
-import re
 
 # ==========================================
 # CONFIGURACIÓN DE PÁGINA
@@ -87,7 +86,6 @@ REGEX_CUENTAS = "borismarinkovic|boris_marinkovic|fundacionmecenas|fundacion_mec
 
 QUERIES_PRENSA = [
     '"Boris Marinkovic"',
-    '"Boris Marinković"',
     '"Fundación Mecenas"'
 ]
 
@@ -117,20 +115,10 @@ def buscar_menciones(query_avanzada, filtro_red_social=None):
             texto_completo = (titulo + " " + link + " " + descripcion).lower()
 
             # 🛑 1. FILTRO ANTI-PERFILES BASURA (LinkedIn Spam)
-            # Si es un perfil de LinkedIn genérico (no un post o artículo), lo saltamos
-            if "linkedin.com/in/" in link.lower() and not any(n in titulo.lower() for n in ["boris", "mecenas"]):
-                continue
-                
-            # Si es una página de empresa genérica
-            if "linkedin.com/company/" in link.lower() and not any(n in titulo.lower() for n in ["boris", "mecenas"]):
+            if "linkedin.com" in link.lower() and not any(n in titulo.lower() for n in ["boris", "mecenas"]):
                 continue
 
-            # 🛑 2. FILTRO DE PERTENENCIA ESTRICTA EN CONTEXTO
-            identidades = ["boris marinkovic", "boris marinković", "borismarinkovic", "fundación mecenas", "fundacion mecenas", "fundacionmecenas"]
-            if not any(ident in texto_completo for ident in identidades):
-                continue
-
-            # 🛑 3. FILTRO ANTI-CLONES 2.0
+            # 🛑 2. FILTRO ANTI-CLONES 2.0 (Homónimos)
             clones = [
                 "gutierrez", "gutiérrez", "san bernardo", 
                 "bolivia", "santa cruz", "diez.bo", "cochabamba", 
@@ -144,7 +132,7 @@ def buscar_menciones(query_avanzada, filtro_red_social=None):
             except Exception:
                 continue
 
-            # Amplitud histórica
+            # Amplitud histórica (Para una línea de tiempo rica)
             if fecha_dt.year < 2018:
                 continue
 
@@ -152,29 +140,29 @@ def buscar_menciones(query_avanzada, filtro_red_social=None):
             fuente = "Prensa"
             cuenta = "Medio de Prensa"
 
-            # Etiquetado de fuente
+            # Etiquetado de fuente elegante
             if "fundacionmecenas" in texto_completo or "fundación mecenas" in titulo.lower():
                 fuente = "Fundación Mecenas"
                 cuenta = "@fundacionmecenas"
             elif "twitter.com" in texto_completo or "x.com" in texto_completo or " en x:" in titulo.lower():
                 fuente = "X (Twitter)"
-                cuenta = titulo.split(" en X:")[0].strip() if " en X:" in titulo else "Usuario X"
+                cuenta = titulo.split(" en X:")[0].strip() if " en X:" in titulo else "Cuenta de X"
             elif "linkedin.com" in texto_completo or " | linkedin" in titulo.lower():
                 fuente = "LinkedIn"
-                cuenta = titulo.split(" | LinkedIn")[0].split("-")[-1].strip() if " | LinkedIn" in titulo else "Usuario LinkedIn"
+                cuenta = titulo.split(" | LinkedIn")[0].split("-")[-1].strip() if " | LinkedIn" in titulo else "Perfil de LinkedIn"
             elif "facebook.com" in texto_completo or " - facebook" in titulo.lower():
                 fuente = "Facebook"
-                cuenta = "borismarinkovic" if any(c in texto_completo for c in REGEX_CUENTAS.split("|")) else "Usuario Facebook"
+                cuenta = "borismarinkovic" if any(c in texto_completo for c in REGEX_CUENTAS.split("|")) else "Cuenta de Facebook"
             elif "instagram.com" in texto_completo or " - instagram" in titulo.lower():
                 fuente = "Instagram"
-                cuenta = "fundacionmecenas" if "fundacionmecenas" in texto_completo else ("borismarinkovic" if "borismarinkovic" in texto_completo else "Usuario Instagram")
+                cuenta = "fundacionmecenas" if "fundacionmecenas" in texto_completo else ("borismarinkovic" if "borismarinkovic" in texto_completo else "Perfil de Instagram")
 
             datos.append({
                 "Fecha":            fecha_dt.date(),
                 "Fuente":           fuente,
                 "Cuenta / Autor":   cuenta,
                 "Título / Mención": titulo,
-                "Extracto":         descripcion, 
+                "Extracto":         descripcion if descripcion else "Sin extracto disponible.", 
                 "Sentimiento":      categoria,
                 "Puntaje":          puntaje,
                 "Link":             link,
@@ -191,16 +179,15 @@ def buscar_menciones(query_avanzada, filtro_red_social=None):
 def main():
     st.title("🎭 Radar de Marca Personal: Boris Marinkovic")
     st.markdown(
-        "Monitoreo avanzado · Médico Cirujano U. de Chile · Artista · "
-        "Presidente [Fundación Mecenas](https://www.fundacionmecenas.cl/) · "
-        "Arte cuir y comunidad LGBTIQANB+ en Chile"
+        "Monitoreo Avanzado · **Médico Cirujano (U. de Chile) · Artista · "
+        "Presidente [Fundación Mecenas](https://www.fundacionmecenas.cl/)**"
     )
     st.divider()
 
     if st.button("🔄 Actualizar Datos Ahora"):
         st.cache_data.clear()
 
-    with st.spinner("Rastreando huella digital y ejecutando búsqueda histórica exhaustiva..."):
+    with st.spinner("Rastreando huella digital y consolidando línea de tiempo..."):
         
         dfs_prensa = []
         for query in QUERIES_PRENSA:
@@ -248,14 +235,14 @@ def main():
             mode="gauge+number",
             value=round(puntaje_general, 1),
             domain={"x": [0, 1], "y": [0, 1]},
-            title={"text": "Índice de Reputación"},
+            title={"text": "Índice de Reputación General"},
             gauge={
                 "axis": {"range": [-100, 100]},
                 "bar": {"color": "#1a1a2e"},
                 "steps": [
                     {"range": [-100, -20], "color": "#ff4b4b"},
-                    {"range": [-20,   20], "color": "#ffa600"},
-                    {"range": [  20, 100], "color": "#00cc96"},
+                    {"range": [-20,   20], "color": "#f1c40f"},
+                    {"range": [  20, 100], "color": "#2ecc71"},
                 ],
                 "threshold": {
                     "line": {"color": "black", "width": 3},
@@ -280,12 +267,12 @@ def main():
         k1.metric("Total Menciones",          len(df_total))
         k2.metric("Menciones en Redes",       len(df_total[df_total["Fuente"] != "Prensa"]))
         k3.metric("Positivas / Negativas",    f"{positivos} / {negativos}")
-        k4.metric("Menciones Fdción. Mecenas", menciones_mecenas)
+        k4.metric("Impacto Fdción. Mecenas", menciones_mecenas)
 
     st.divider()
 
     # ==========================================
-    # PESTAÑAS DINÁMICAS
+    # PESTAÑAS DINÁMICAS Y ELEGANTES
     # ==========================================
     df_social  = df_total[df_total["Fuente"].isin(["X (Twitter)", "LinkedIn", "Facebook", "Instagram"])]
     df_medios  = df_total[df_total["Fuente"] == "Prensa"]
@@ -297,14 +284,14 @@ def main():
 
     nombres_pestanas = []
     if not df_social.empty:   
-        nombres_pestanas.append("📱 Ecosistema Redes")
+        nombres_pestanas.append("📱 Impacto en Redes")
     if not df_mecenas.empty:  
         nombres_pestanas.append("🏛️ Fundación Mecenas")
         
     nombres_pestanas.extend([
-        "📰 Medios y Prensa",
-        "🗄️ Base de Datos Completa",
-        "👣 Rastro Cuentas Oficiales",
+        "📰 Prensa y Medios",
+        "🗄️ Base de Datos",
+        "👣 Rastro Oficial",
     ])
 
     pestanas = st.tabs(nombres_pestanas)
@@ -315,33 +302,48 @@ def main():
     # ------------------------------------------
     if not df_social.empty:
         with pestanas[indice]:
-            st.markdown("#### Distribución por Red y Sentimiento")
+            st.markdown("### Comportamiento en Redes Sociales")
             col1, col2 = st.columns(2)
+            
             with col1:
                 fig_social = px.histogram(
                     df_social, x="Fuente", color="Sentimiento",
-                    color_discrete_map={"Positivo":"#00cc96","Neutral":"#7f7f7f","Negativo":"#ff4b4b"},
-                    title="Sentimiento por Red Social", barmode="group",
+                    color_discrete_map={"Positivo":"#2ecc71","Neutral":"#95a5a6","Negativo":"#e74c3c"},
+                    title="Sentimiento por Plataforma", barmode="group",
                 )
                 st.plotly_chart(fig_social, use_container_width=True)
+                
             with col2:
+                # UX: Ignoramos cuentas genéricas para el Top 5, para que se vea limpio
+                cuentas_genericas = ["Cuenta de Facebook", "Perfil de Instagram", "Cuenta de X", "Perfil de LinkedIn"]
                 df_otros = df_social[~df_social["Cuenta / Autor"].str.contains(REGEX_CUENTAS, case=False, na=False)]
-                top = df_otros["Cuenta / Autor"].value_counts().reset_index().head(5)
-                top.columns = ["Cuenta", "Menciones"]
-                fig_top = px.bar(
-                    top, x="Menciones", y="Cuenta", orientation="h",
-                    title="Top 5: Cuentas de Terceros",
-                    color="Menciones", color_continuous_scale="Blues",
-                )
-                fig_top.update_layout(yaxis={"categoryorder": "total ascending"})
-                st.plotly_chart(fig_top, use_container_width=True)
+                df_otros = df_otros[~df_otros["Cuenta / Autor"].isin(cuentas_genericas)]
+                
+                if not df_otros.empty:
+                    top = df_otros["Cuenta / Autor"].value_counts().reset_index().head(5)
+                    top.columns = ["Cuenta", "Menciones"]
+                    fig_top = px.bar(
+                        top, x="Menciones", y="Cuenta", orientation="h",
+                        title="Top 5: Autores Identificados",
+                        color="Menciones", color_continuous_scale="Blues",
+                    )
+                    fig_top.update_layout(yaxis={"categoryorder": "total ascending"})
+                    st.plotly_chart(fig_top, use_container_width=True)
+                else:
+                    st.info("La mayoría de las interacciones recientes provienen de perfiles privados o anónimos.")
 
-            st.markdown("#### Últimas menciones en redes (Con contexto)")
+            st.markdown("#### Últimas Menciones Relevantes")
             for _, row in df_social.head(8).iterrows():
                 icono = "🟢" if row["Sentimiento"]=="Positivo" else ("🔴" if row["Sentimiento"]=="Negativo" else "⚪")
-                with st.expander(f"{icono} {row['Cuenta / Autor']} en {row['Fuente']} - {row['Fecha']}"):
-                    st.markdown(f"**Título:** [{row['Título / Mención']}]({row['Link']})")
-                    st.caption(f"**Por qué apareció en el radar (Contexto extraído):** {row['Extracto']}")
+                
+                # UX: Formateo elegante del título del expander
+                autor_display = row['Cuenta / Autor'] if row['Cuenta / Autor'] not in cuentas_genericas else f"Mención en {row['Fuente']}"
+                fecha_str = row['Fecha'].strftime('%d %b %Y')
+                
+                with st.expander(f"{icono} {autor_display} — {fecha_str}"):
+                    st.markdown(f"**Publicación:** [{row['Título / Mención']}]({row['Link']})")
+                    if row['Extracto'] and row['Extracto'] != "Sin extracto disponible.":
+                        st.caption(f"**Contexto:** {row['Extracto']}")
         indice += 1
 
     # ------------------------------------------
@@ -350,34 +352,35 @@ def main():
     if not df_mecenas.empty:
         with pestanas[indice]:
             st.markdown(
-                "#### Cobertura vinculada a Fundación Mecenas\n"
-                "> Fundación sin fines de lucro · Arte cuir · LGBTIQANB+ · Chile"
+                "### Impacto de Fundación Mecenas\n"
+                "> Rol: Presidente Fundador · Ecosistema: Arte cuir y LGBTIQANB+ en Chile"
             )
             col_m1, col_m2 = st.columns(2)
             with col_m1:
                 fig_m_sent = px.pie(
                     df_mecenas, names="Sentimiento", color="Sentimiento",
-                    color_discrete_map={"Positivo":"#00cc96","Neutral":"#7f7f7f","Negativo":"#ff4b4b"},
-                    title="Tono de las menciones", hole=0.4,
+                    color_discrete_map={"Positivo":"#2ecc71","Neutral":"#95a5a6","Negativo":"#e74c3c"},
+                    title="Tono General de las Menciones", hole=0.4,
                 )
                 st.plotly_chart(fig_m_sent, use_container_width=True)
             with col_m2:
                 fig_m_fuente = px.histogram(
                     df_mecenas, x="Fuente", color="Sentimiento",
-                    color_discrete_map={"Positivo":"#00cc96","Neutral":"#7f7f7f","Negativo":"#ff4b4b"},
-                    title="Fuente de las menciones",
+                    color_discrete_map={"Positivo":"#2ecc71","Neutral":"#95a5a6","Negativo":"#e74c3c"},
+                    title="Distribución de Fuentes",
                 )
                 st.plotly_chart(fig_m_fuente, use_container_width=True)
 
-            st.markdown("#### Publicaciones recientes vinculadas a Fundación Mecenas")
+            st.markdown("#### Registro Histórico y Reciente")
             for _, row in df_mecenas.head(10).iterrows():
-                color = "#00cc96" if row["Sentimiento"]=="Positivo" else ("#ff4b4b" if row["Sentimiento"]=="Negativo" else "#7f7f7f")
+                color = "#2ecc71" if row["Sentimiento"]=="Positivo" else ("#e74c3c" if row["Sentimiento"]=="Negativo" else "#95a5a6")
+                fecha_str = row['Fecha'].strftime('%d %b %Y')
                 st.markdown(
-                    f"<div style='padding:14px;border-left:6px solid {color}; background:#f8f9fa;margin-bottom:12px;border-radius:0 6px 6px 0;'>"
-                    f"<strong>{row['Fuente']}</strong> · <span style='color:{color};font-weight:bold'>{row['Sentimiento']}</span><br>"
-                    f"<i>{row['Título / Mención']}</i><br>"
-                    f"<small style='color:gray'>Contexto: {row['Extracto'][:150]}...</small><br>"
-                    f"<small>📅 {row['Fecha']} · <a href='{row['Link']}' target='_blank'>🔗 Ver publicación</a></small>"
+                    f"<div style='padding:15px; border-left:4px solid {color}; background-color:#ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom:12px; border-radius:4px;'>"
+                    f"<strong>{row['Fuente']}</strong> · <span style='color:{color};font-weight:600'>{row['Sentimiento']}</span><br>"
+                    f"<span style='font-size: 1.1em;'>{row['Título / Mención']}</span><br>"
+                    f"<small style='color:#7f8c8d; display:block; margin-top:5px;'>{row['Extracto'][:200]}...</small>"
+                    f"<small style='display:block; margin-top:8px;'>📅 {fecha_str} · <a href='{row['Link']}' target='_blank' style='color:#3498db; text-decoration:none;'>🔗 Leer fuente original</a></small>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -388,39 +391,54 @@ def main():
     # ------------------------------------------
     with pestanas[indice]:
         if not df_medios.empty:
-            st.markdown("#### Línea de Tiempo · Cobertura en Prensa (Desde 2018)")
+            st.markdown("### Línea de Tiempo Institucional y Prensa")
+            st.caption("Visión macro de la cobertura desde 2018 (Hitos médicos, artísticos y académicos)")
+            
+            # UX: Gráfico de línea de tiempo más limpio y elegante
             fig_tl = px.scatter(
                 df_medios, x="Fecha", y="Puntaje", color="Sentimiento",
-                color_discrete_map={"Positivo":"#00cc96","Neutral":"#7f7f7f","Negativo":"#ff4b4b"},
-                hover_data=["Título / Mención"], title="Evolución del tono mediático",
+                color_discrete_map={"Positivo":"#2ecc71","Neutral":"#95a5a6","Negativo":"#e74c3c"},
+                hover_data=["Título / Mención"], 
+                title=""
             )
-            fig_tl.update_traces(marker=dict(size=10, opacity=0.8))
-            fig_tl.add_hline(y=0, line_dash="dot", line_color="gray", annotation_text="Zona Neutral")
+            fig_tl.update_traces(marker=dict(size=12, opacity=0.8, line=dict(width=1, color='DarkSlateGrey')))
+            fig_tl.add_hline(y=0, line_dash="dash", line_color="#bdc3c7", annotation_text="Zona de Neutralidad")
+            fig_tl.update_layout(
+                xaxis_title="", 
+                yaxis_title="Nivel de Impacto",
+                plot_bgcolor='rgba(0,0,0,0)',
+                yaxis=dict(showgrid=True, gridcolor='#f1f2f6')
+            )
             st.plotly_chart(fig_tl, use_container_width=True)
 
-            st.markdown("#### Noticias recientes (Con contexto)")
+            st.markdown("#### Archivo de Prensa")
             for _, row in df_medios.head(10).iterrows():
                 icono = "🟢" if row["Sentimiento"]=="Positivo" else ("🔴" if row["Sentimiento"]=="Negativo" else "⚪")
-                with st.expander(f"{icono} {row['Fecha']} — {row['Título / Mención']}"):
-                    st.write(f"**Extracto de la noticia:** {row['Extracto']}")
-                    st.markdown(f"[🔗 Leer nota completa en {row['Fuente']}]({row['Link']})")
+                fecha_str = row['Fecha'].strftime('%d %b %Y')
+                
+                with st.expander(f"{icono} {fecha_str} | {row['Título / Mención']}"):
+                    if row['Extracto'] and row['Extracto'] != "Sin extracto disponible.":
+                        st.write(f"**Resumen:** {row['Extracto']}")
+                    st.markdown(f"[🔗 Ver publicación completa]({row['Link']})")
         else:
-            st.info("No se encontraron menciones en prensa para el período analizado.")
+            st.info("No se encontraron menciones en prensa. Intenta ampliar los términos de búsqueda.")
     indice += 1
 
     # ------------------------------------------
     # PESTAÑA: BASE DE DATOS COMPLETA
     # ------------------------------------------
     with pestanas[indice]:
-        st.markdown("#### Todas las menciones indexadas")
+        st.markdown("### Auditoría de Datos")
+        st.caption("Base de datos en bruto para exportación y análisis profundo.")
+        
         col_f1, col_f2, col_f3 = st.columns(3)
         with col_f1:
             fuentes_disp = ["Todas"] + sorted(df_total["Fuente"].unique().tolist())
-            filtro_fuente = st.selectbox("Filtrar por Fuente", fuentes_disp)
+            filtro_fuente = st.selectbox("Filtrar por Origen", fuentes_disp)
         with col_f2:
-            filtro_sent = st.selectbox("Filtrar por Sentimiento", ["Todos","Positivo","Neutral","Negativo"])
+            filtro_sent = st.selectbox("Filtrar por Valoración", ["Todos","Positivo","Neutral","Negativo"])
         with col_f3:
-            busq_texto = st.text_input("Buscar en títulos o extractos", "")
+            busq_texto = st.text_input("Palabra clave en título o texto", "")
 
         df_f = df_total.copy()
         if filtro_fuente != "Todas":  
@@ -431,32 +449,31 @@ def main():
             df_f = df_f[df_f["Título / Mención"].str.contains(busq_texto, case=False, na=False) | 
                         df_f["Extracto"].str.contains(busq_texto, case=False, na=False)]
 
-        st.caption(f"Mostrando {len(df_f)} de {len(df_total)} registros")
+        st.markdown(f"**Resultados:** {len(df_f)} registros encontrados.")
 
         st.dataframe(
-            df_f[["Fecha", "Fuente", "Cuenta / Autor", "Título / Mención", "Sentimiento", "Puntaje"]].style.map(
+            df_f[["Fecha", "Fuente", "Cuenta / Autor", "Título / Mención", "Sentimiento"]].style.map(
                 lambda x: (
-                    "background-color: #ffcccc" if x == "Negativo"
-                    else ("background-color: #ccffcc" if x == "Positivo" else "")
+                    "background-color: #fadbd8; color: #78281f;" if x == "Negativo"
+                    else ("background-color: #d5f5e3; color: #186a3b;" if x == "Positivo" else "")
                 ),
                 subset=["Sentimiento"],
             ),
             use_container_width=True,
-            height=420,
+            height=400,
         )
 
         csv = df_f.to_csv(index=False).encode("utf-8")
-        st.download_button("⬇️ Descargar CSV filtrado", csv, "menciones_boris.csv", "text/csv")
+        st.download_button("⬇️ Exportar a CSV (Excel)", csv, "reporte_marinkovic.csv", "text/csv")
     indice += 1
 
     # ------------------------------------------
     # PESTAÑA: RASTRO CUENTAS OFICIALES (Anti-Ego)
     # ------------------------------------------
     with pestanas[indice]:
-        st.markdown("#### Interacciones de terceros hacia las cuentas oficiales")
-        st.caption("Filtro Anti-Ego activo · Cuentas monitoreadas: @borismarinkovic · @fundacionmecenas")
+        st.markdown("### Interacciones Directas (Terceros)")
+        st.caption("Menciones directas hacia las cuentas oficiales (@borismarinkovic · @fundacionmecenas), excluyendo publicaciones propias.")
 
-        # Aseguramos que los parentesis cierren correctamente en esta variable
         filtro_cuentas = (
             df_total["Título / Mención"].str.contains(REGEX_CUENTAS, case=False, na=False) |
             df_total["Extracto"].str.contains(REGEX_CUENTAS, case=False, na=False) |
@@ -467,26 +484,26 @@ def main():
         df_oficial = df_total[filtro_cuentas & filtro_no_cliente]
 
         if not df_oficial.empty:
-            st.metric("Interacciones de terceros detectadas", len(df_oficial))
+            st.metric("Total interacciones de terceros", len(df_oficial))
             for _, row in df_oficial.head(10).iterrows():
-                color = "#00cc96" if row["Sentimiento"]=="Positivo" else ("#ff4b4b" if row["Sentimiento"]=="Negativo" else "#7f7f7f")
+                color = "#2ecc71" if row["Sentimiento"]=="Positivo" else ("#e74c3c" if row["Sentimiento"]=="Negativo" else "#95a5a6")
+                fecha_str = row['Fecha'].strftime('%d %b %Y')
                 st.markdown(
-                    f"<div style='padding:15px;border-left:6px solid {color}; background:#f8f9fa;margin-bottom:15px;border-radius:0 6px 6px 0;'>"
-                    f"<strong>{row['Fuente']}</strong> · <span style='color:{color};font-weight:bold'>{row['Sentimiento']}</span><br>"
-                    f"<i>{row['Título / Mención']}</i><br>"
-                    f"<small style='color:gray'>Contexto: {row['Extracto'][:150]}...</small><br>"
-                    f"<small>📅 {row['Fecha']} · <a href='{row['Link']}' target='_blank'>🔗 Ver publicación</a></small>"
+                    f"<div style='padding:15px; border-left:4px solid {color}; background-color:#ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom:12px; border-radius:4px;'>"
+                    f"<strong>{row['Fuente']}</strong> · <span style='color:{color};font-weight:600'>{row['Sentimiento']}</span><br>"
+                    f"<span>{row['Título / Mención']}</span><br>"
+                    f"<small style='display:block; margin-top:8px;'>📅 {fecha_str} · <a href='{row['Link']}' target='_blank' style='color:#3498db; text-decoration:none;'>🔗 Ir a la publicación</a></small>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
         else:
-            st.info("No se detectaron interacciones recientes de terceros hacia las cuentas oficiales.")
+            st.info("No hay menciones recientes de terceros apuntando a las cuentas oficiales.")
 
     st.divider()
     st.caption(
-        f"🕐 Última actualización: {datetime.now().strftime('%d/%m/%Y %H:%M')} · "
-        "Fuente: Google News RSS · "
-        "Variantes y contexto: Boris Marinkovic (Desde 2018) / Arte Cuir / Fundación Mecenas / U. de Chile"
+        f"🕐 Actualizado: {datetime.now().strftime('%d/%m/%Y %H:%M')} · "
+        "Motor: OSINT Avanzado / Google News RSS · "
+        "Perímetro de Búsqueda: Boris Marinkovic (Desde 2018) / Arte Cuir / Mecenas / U. de Chile"
     )
 
 if __name__ == "__main__":
