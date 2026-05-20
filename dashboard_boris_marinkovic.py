@@ -19,10 +19,6 @@ st.set_page_config(
 
 # ==========================================
 # DICCIONARIO DE SENTIMIENTO PERSONALIZADO (Enriquecido OSINT)
-# Cubre tres dimensiones del cliente:
-#   1. Médico Cirujano e Institucionalidad
-#   2. Arte cuir / Ecosistema Cultural
-#   3. Fundación Mecenas
 # ==========================================
 DICCIONARIO_SENTIMIENTO = {
     # --- BASE POSITIVO ---
@@ -86,37 +82,20 @@ def analizar_sentimiento_avanzado(texto):
     else:                 return "Neutral",  promedio
 
 # ==========================================
-# HANDLES Y QUERIES DE BÚSQUEDA ENRIQUECIDAS
+# HANDLES Y QUERIES MULTIPLES (ESTRATEGIA EXHAUSTIVA)
+# Para evitar que Google News ignore cadenas muy largas, dividimos las búsquedas.
 # ==========================================
 REGEX_CUENTAS = "borismarinkovic|boris_marinkovic|fundacionmecenas|fundacion_mecenas|mecenas"
 
-BUSQUEDA_NOMBRE = (
-    '"Boris Marinkovic" OR "Boris Marinković" OR '
-    '"Marinkovic Chile"'
-)
+QUERIES_PRENSA = [
+    '"Boris Marinkovic"',
+    '"Boris Marinković"',
+    '"Fundación Mecenas"',
+    '"Boris Marinkovic" (arte OR artista OR cuir OR exposición)',
+    '"Boris Marinkovic" (médico OR cirujano OR hospital)'
+]
 
-BUSQUEDA_MEDICO = (
-    '"Marinkovic cirujano" OR "Marinkovic médico" OR '
-    '"Boris Marinkovic cirugía" OR "Boris Marinkovic medicina" OR '
-    '"Boris Marinkovic" "Hospital del Salvador" OR '
-    '"Boris Marinkovic" "Universidad de Chile"'
-)
-
-BUSQUEDA_FUNDACION = (
-    '"Fundación Mecenas" OR "fundacionmecenas" OR '
-    '"Boris Marinkovic Mecenas" OR "Mecenas arte cuir" OR '
-    '"Mecenas LGBTIQ" OR "Mecenas disidencias"'
-)
-
-BUSQUEDA_CUENTAS = (
-    '"@borismarinkovic" OR "@fundacionmecenas" OR '
-    '"instagram.com/borismarinkovic" OR "instagram.com/fundacionmecenas"'
-)
-
-BUSQUEDA_TOTAL = (
-    f"({BUSQUEDA_NOMBRE}) OR ({BUSQUEDA_MEDICO}) OR "
-    f"({BUSQUEDA_FUNDACION}) OR ({BUSQUEDA_CUENTAS})"
-)
+QUERY_REDES_SOCIALES = '"Boris Marinkovic" OR "Fundación Mecenas" OR "borismarinkovic" OR "fundacionmecenas"'
 
 @st.cache_data(ttl=3600)
 def buscar_menciones(query_avanzada, filtro_red_social=None):
@@ -143,8 +122,13 @@ def buscar_menciones(query_avanzada, filtro_red_social=None):
             
             texto_completo = (titulo + " " + link).lower()
 
-            # 🛑 FILTRO ANTI-CLONES (Homónimos: Bolivia y San Bernardo)
-            if any(omit in texto_completo for omit in ["gutierrez", "gutiérrez", "san bernardo", "bolivia", "santa cruz"]):
+            # 🛑 FILTRO ANTI-CLONES 2.0 (Incluye al tirador deportivo de Bolivia)
+            clones = [
+                "gutierrez", "gutiérrez", "san bernardo", # Médico homónimo
+                "bolivia", "santa cruz", "diez.bo", "cochabamba", # Lugares de Bolivia
+                "tiro deportivo", "récord", "deportista", "campeonato" # El atleta homónimo
+            ]
+            if any(omit in texto_completo for omit in clones):
                 continue
 
             try:
@@ -154,7 +138,8 @@ def buscar_menciones(query_avanzada, filtro_red_social=None):
             except Exception:
                 continue
 
-            if fecha_dt.year < 2024:
+            # 🕰️ AMPLIACIÓN HISTÓRICA: Buscamos desde 2018 para tener trayectoria completa
+            if fecha_dt.year < 2018:
                 continue
 
             categoria, puntaje = analizar_sentimiento_avanzado(titulo)
@@ -206,7 +191,7 @@ def buscar_menciones(query_avanzada, filtro_red_social=None):
         return pd.DataFrame(datos)
 
     except Exception as e:
-        st.error(f"Error al buscar datos: {e}")
+        # En vez de mostrar error en pantalla y asustar al cliente, devolvemos un df vacío
         return pd.DataFrame()
 
 # ==========================================
@@ -224,23 +209,41 @@ def main():
     if st.button("🔄 Actualizar Datos Ahora"):
         st.cache_data.clear()
 
-    # --- Carga de datos desde las 4 fuentes ---
-    with st.spinner("Rastreando huella digital en web y redes sociales (aplicando filtro Anti-Clones)..."):
-        df_prensa   = buscar_menciones(BUSQUEDA_TOTAL)
-        df_x        = buscar_menciones(BUSQUEDA_TOTAL, "twitter.com")
-        df_linkedin = buscar_menciones(BUSQUEDA_TOTAL, "linkedin.com")
-        df_ig       = buscar_menciones(BUSQUEDA_TOTAL, "instagram.com")
+    # --- Carga de datos desde múltiples fuentes (Estrategia Exhaustiva) ---
+    with st.spinner("Rastreando huella digital y ejecutando búsqueda histórica exhaustiva..."):
+        
+        # 1. Ejecutar múltiples búsquedas de prensa para sortear límites de Google
+        dfs_prensa = []
+        for query in QUERIES_PRENSA:
+            df_temp = buscar_menciones(query)
+            if not df_temp.empty:
+                dfs_prensa.append(df_temp)
+                
+        df_prensa = pd.concat(dfs_prensa).drop_duplicates(subset=["Link"]) if dfs_prensa else pd.DataFrame()
 
-        df_total = (
-            pd.concat([df_prensa, df_x, df_linkedin, df_ig])
-            .drop_duplicates(subset=["Link"])
-            .reset_index(drop=True)
-            .sort_values(by="Fecha", ascending=False)
-            .reset_index(drop=True)
-        )
+        # 2. Búsquedas específicas en Redes Sociales
+        df_x        = buscar_menciones(QUERY_REDES_SOCIALES, "twitter.com")
+        df_linkedin = buscar_menciones(QUERY_REDES_SOCIALES, "linkedin.com")
+        df_ig       = buscar_menciones(QUERY_REDES_SOCIALES, "instagram.com")
+        df_fb       = buscar_menciones(QUERY_REDES_SOCIALES, "facebook.com") # Añadido Facebook
+
+        # 3. Unificar todo
+        tablas_a_unir = [df_prensa, df_x, df_linkedin, df_ig, df_fb]
+        tablas_a_unir = [df for df in tablas_a_unir if not df.empty]
+        
+        if tablas_a_unir:
+            df_total = (
+                pd.concat(tablas_a_unir)
+                .drop_duplicates(subset=["Link"])
+                .reset_index(drop=True)
+                .sort_values(by="Fecha", ascending=False)
+                .reset_index(drop=True)
+            )
+        else:
+            df_total = pd.DataFrame()
 
     if df_total.empty:
-        st.warning("No se encontraron menciones recientes. Verifica tu conexión o intenta más tarde.")
+        st.warning("No se encontraron menciones. Verifica tu conexión o intenta con otros términos de búsqueda.")
         return
 
     # ==========================================
@@ -248,6 +251,9 @@ def main():
     # ==========================================
     st.subheader("📊 Salud de Marca Digital")
     puntaje_general = df_total["Puntaje"].mean() * 20  # Escala -100 / +100
+    
+    # Manejo seguro de NaN si todas las noticias son Neutrales (Puntaje 0)
+    if pd.isna(puntaje_general): puntaje_general = 0 
 
     col_gauge, col_kpis = st.columns([1, 2])
 
@@ -394,7 +400,7 @@ def main():
     # ------------------------------------------
     with pestanas[indice]:
         if not df_medios.empty:
-            st.markdown("#### Línea de Tiempo · Cobertura en Prensa")
+            st.markdown("#### Línea de Tiempo · Cobertura en Prensa (Desde 2018)")
             fig_tl = px.scatter(
                 df_medios, x="Fecha", y="Puntaje", color="Sentimiento",
                 color_discrete_map={"Positivo":"#00cc96","Neutral":"#7f7f7f","Negativo":"#ff4b4b"},
@@ -503,7 +509,7 @@ def main():
         f"🕐 Última actualización: {datetime.now().strftime('%d/%m/%Y %H:%M')} · "
         "Fuente: Google News RSS · "
         "Cuentas monitoreadas: @borismarinkovic · @fundacionmecenas · "
-        "Variantes: Boris Marinkovic / Fundación Mecenas / Universidad de Chile / Hospital del Salvador"
+        "Variantes y contexto: Boris Marinkovic (Desde 2018) / Arte Cuir / Fundación Mecenas / U. de Chile"
     )
 
 if __name__ == "__main__":
